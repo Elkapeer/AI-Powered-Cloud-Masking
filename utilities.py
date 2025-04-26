@@ -1,13 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import random
-from functools import reduce
-import itertools
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from collections import defaultdict
 import torch.nn.functional as F
-import torch
 import torch.optim as optim
 from torch.optim import lr_scheduler
 import copy
@@ -16,6 +13,8 @@ import rasterio
 import pandas as pd
 import os
 import shutil
+import torch
+
 
 def plot_one_prediction(img_array, titles=None, ncol=3):
     """
@@ -158,7 +157,7 @@ def split_dataset(file_list, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
 
     return train_files, val_files, test_files
 
-def get_data_loader(data_files, trans, input_dir='clean', batch_size=25, shuffle=True):
+def get_data_loader(data_files, trans, input_dir='inputs/cleaned', batch_size=25, shuffle=True):
 
     data_set = LazyDataset(data_files, input_dir=input_dir, transform=trans)
     
@@ -311,7 +310,7 @@ def train_model(model, optimizer, scheduler, dataloaders, pos_weight, num_epochs
             best_model_wts = copy.deepcopy(model.state_dict())
             patience_counter = 0
             # Save model to file
-            torch.save(model.state_dict(), 'best_model.pkl')
+            torch.save(model.state_dict(), 'outputs/temp/best_model.pkl')
         else:
             patience_counter += 1
             
@@ -322,14 +321,14 @@ def train_model(model, optimizer, scheduler, dataloaders, pos_weight, num_epochs
     print(f'Best val dice: {best_dice:.4f}, Best Threshold: {best_threshold:.2f}')
 
     # Write threshold to file
-    with open("best_threshold.txt", "w") as f:
+    with open("outputs/temp/best_threshold.txt", "w") as f:
         f.write(str(best_threshold))
 
     model.load_state_dict(best_model_wts)
 
     return model, best_threshold
 
-def run(UNet, lr= 1e-3, num_epochs= 60, input_dir= 'clean', patience=10, gamma=0.5, batch_size=4):
+def run(UNet, lr= 1e-3, num_epochs= 60, input_dir='inputs/cleaned', patience=10, gamma=0.5, batch_size=4):
     
     data_files = [f for f in os.listdir(input_dir + '/data')]
 
@@ -365,7 +364,7 @@ def run(UNet, lr= 1e-3, num_epochs= 60, input_dir= 'clean', patience=10, gamma=0
       
     validate_one_epoch(model, test_dataloader, device, thresholds=[best_threshold])
     
-def predict_one(model, image_path, mask_path, threshold=0.5, visualize=False):
+def predict_one(model, image_path, mask_path, threshold=0.5, visualize=False, input_dir='dataset'):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -381,8 +380,7 @@ def predict_one(model, image_path, mask_path, threshold=0.5, visualize=False):
     mask = mask.astype(np.uint8)
     mask[0][0] = 0 # for plotting
 
-    df = pd.read_csv('dataset_summary.csv')
-    data_files = df['image_file'].to_list()
+    data_files = [f for f in os.listdir(input_dir + '/data')]
 
     mean, std = getMeanAndStd(data_files)
     transform = transforms.Compose([
@@ -455,7 +453,7 @@ def predict_and_clean(model, input_dir='dataset', best_threshold=0.5, confidence
         image_path = input_dir + '/data/' + file_name
         mask_path = input_dir + '/masks/' + file_name
 
-        percentage_match, pred = predict_one(model, image_path, mask_path, threshold=best_threshold, visualize=visualize)
+        percentage_match, pred = predict_one(model, image_path, mask_path, threshold=best_threshold, visualize=visualize, input_dir=input_dir)
         
         total_percentage += percentage_match
         total_samples += 1
@@ -464,29 +462,21 @@ def predict_and_clean(model, input_dir='dataset', best_threshold=0.5, confidence
 
         if percentage_match < confidence:
             if replace:
-                shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('processed/data', file_name))
+                shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('inputs/processed/data', file_name))
                 save_predicted_mask(pred_mask=pred, 
-                                    reference_tif_path='dataset/masks/100096.tif', save_folder='processed/masks', save_name=file_name)
+                                    reference_tif_path='dataset/masks/100096.tif', save_folder='inputs/processed/masks', save_name=file_name)
             else:
                 shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('noise/data', file_name))
                 shutil.copy(os.path.join(input_dir + '/masks', file_name), os.path.join('noise/masks', file_name))
         else:
-            shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('cleaned/data', file_name))
-            shutil.copy(os.path.join(input_dir + '/masks', file_name), os.path.join('cleaned/masks', file_name))
+            shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('inputs/cleaned/data', file_name))
+            shutil.copy(os.path.join(input_dir + '/masks', file_name), os.path.join('inputs/cleaned/masks', file_name))
 
     avg_percentage_match = total_percentage / total_samples
     print(f"Average Percentage Match on Test Set: {avg_percentage_match:.2f}%")
 
 def save_predicted_mask(pred_mask: np.ndarray, reference_tif_path: str, save_folder: str, save_name: str):
-    """
-    Saves the predicted mask to a .tif file with georeferencing from a reference tif.
     
-    Args:
-        pred_mask (np.ndarray): Predicted binary mask (H, W) or (1, H, W).
-        reference_tif_path (str): Path to original image for metadata.
-        save_folder (str): Directory where to save the mask.
-        save_name (str): Filename for the saved mask (e.g., 'mask_001.tif').
-    """
     os.makedirs(save_folder, exist_ok=True)
     
     with rasterio.open(reference_tif_path) as src:
@@ -507,4 +497,26 @@ def save_predicted_mask(pred_mask: np.ndarray, reference_tif_path: str, save_fol
 
     # print(f"Saved predicted mask to: {save_path}")
 
+def inference(model, image_path, threshold, transform):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    model.eval()
+    model.to(device)
+
+    with rasterio.open(image_path) as src:
+        image = src.read()  # shape: (C, H, W)
+    image = image.astype(np.float32)
+
+    image_tensor = torch.from_numpy(image)
+    image_tensor = transform(image_tensor)
+    image_tensor = image_tensor.unsqueeze(0) # Add batch dimension  # shape: (1, C, H, W)
+    image_tensor = image_tensor.to(device)
+
+    with torch.no_grad():
+        output = model(image_tensor)
+        pred = torch.sigmoid(output)
+        pred = (pred > threshold).float()
+
+    pred_mask = pred.squeeze().cpu().numpy().astype(np.uint8)
+    return pred_mask
 

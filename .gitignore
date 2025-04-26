@@ -9,4 +9,6 @@ cloud
 to_review
 processed
 papers
+outputs
+inputs
 __pycache__
