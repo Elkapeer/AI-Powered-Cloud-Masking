@@ -8,6 +8,7 @@ import rle_encoder_decoder
 import sys
 from torchvision import transforms
 from unet import UNet
+from skimage.transform import resize
 
 def generateSubmission(input_dir='test'):
 
@@ -38,8 +39,7 @@ def generateSubmission(input_dir='test'):
         img_path = input_dir + '/' + f
 
         pred = utilities.inference(model, img_path, threshold, transform)
-
-        if np.all(pred == 0): continue # TODO: fix this
+        pred = resize(pred, (256, 256), order=0, preserve_range=True, anti_aliasing=False).astype(pred.dtype)
 
         encoded_pred = rle_encoder_decoder.rle_encode(pred)
 
@@ -58,7 +58,7 @@ def generateSubmission(input_dir='test'):
 if __name__ == "__main__":
     
     if len(sys.argv) < 2:
-        raise Exception("Folder name not provided. Usage: python run_inference.py <test_folder_name>")
+        raise Exception("Test folder name not provided. Usage: python run_inference.py <test_folder_name>")
     
     submission_df = generateSubmission(sys.argv[1]) 
     

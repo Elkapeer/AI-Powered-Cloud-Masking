@@ -13,12 +13,13 @@ class ParticipantVisibleError(Exception):
 def rle_decode(mask_rle: str, shape=(256, 256)) -> np.ndarray:
     """Decodes an RLE-encoded string into a binary mask with validation checks."""
     
-    if not isinstance(mask_rle, str) or not mask_rle.strip():
-        raise ParticipantVisibleError("RLE segmentation must be a non-empty string")
+    if not isinstance(mask_rle, str) or not mask_rle.strip() or mask_rle.lower() == 'nan':
+        # Return all-zero mask if RLE is empty, invalid, or NaN
+        return np.zeros(shape, dtype=np.uint8)
     
     try:
         s = list(map(int, mask_rle.split()))
-    except ValueError:
+    except:
         raise ParticipantVisibleError("RLE segmentation must contain only integers")
     
     if len(s) % 2 != 0:
@@ -40,7 +41,7 @@ def rle_decode(mask_rle: str, shape=(256, 256)) -> np.ndarray:
 def dice_coefficient(mask1: np.ndarray, mask2: np.ndarray) -> float:
     """Computes the Dice coefficient between two binary masks."""
     intersection = np.sum(mask1 * mask2)
-    return (2.0 * intersection) / (np.sum(mask1) + np.sum(mask2) + 1e-7)  # Avoid division by zero
+    return (2.0 * intersection + 1e-7) / (np.sum(mask1) + np.sum(mask2) + 1e-7)  # Avoid division by zero
 
 def score(solution: pd.DataFrame, submission: pd.DataFrame, row_id_column_name: str) -> float:
     """Computes the Dice score between solution and submission."""
@@ -61,8 +62,8 @@ def score(solution: pd.DataFrame, submission: pd.DataFrame, row_id_column_name: 
     # Decode RLE masks and compute Dice score
     dice_scores = []
     for solution_seg, submission_seg in zip(solution["segmentation"], submission["segmentation"]):
-        solution_mask = rle_decode(solution_seg, shape=(512,512))
-        submission_mask = rle_decode(submission_seg, shape=(512,512))
+        solution_mask = rle_decode(solution_seg)
+        submission_mask = rle_decode(submission_seg)
         dice_scores.append(dice_coefficient(solution_mask, submission_mask))
     
     return np.mean(dice_scores)
