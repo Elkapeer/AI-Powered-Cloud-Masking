@@ -15,6 +15,10 @@ import os
 import shutil
 import torch
 
+def filterDataset(filename):
+    with open('dataset_filter/' + filename + '.txt', 'r') as f:
+        data_files = [line.strip() for line in f if line.strip()]
+    return data_files
 
 def plot_one_prediction(img_array, titles=None, ncol=3):
     """
@@ -88,7 +92,7 @@ def reverse_transform(inp, mean, std):
     return inp
 
 class LazyDataset(Dataset):
-    def __init__(self, image_files, input_dir='clean', transform=None):
+    def __init__(self, image_files, input_dir='dataset', transform=None):
         self.image_files = image_files
         self.input_dir = input_dir
         self.transform = transform
@@ -157,7 +161,7 @@ def split_dataset(file_list, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
 
     return train_files, val_files, test_files
 
-def get_data_loader(data_files, trans, input_dir='inputs/cleaned', batch_size=25, shuffle=True):
+def get_data_loader(data_files, trans, input_dir='dataset', batch_size=25, shuffle=True):
 
     data_set = LazyDataset(data_files, input_dir=input_dir, transform=trans)
     
@@ -174,7 +178,7 @@ def calc_pos_weight(image_files):
 
     return torch.tensor([neg / (pos + 1e-6)], dtype=torch.float32)
 
-def dice_coefficient(pred, target, smooth=1., val=False, th=0.5):
+def dice_coefficient(pred, target, smooth=1e-7, val=False, th=0.5):
     if val:
         pred = (pred > th).float()
         target = target.float()
@@ -328,10 +332,10 @@ def train_model(model, optimizer, scheduler, dataloaders, pos_weight, num_epochs
 
     return model, best_threshold
 
-def run(UNet, lr= 1e-3, num_epochs= 60, input_dir='inputs/cleaned', patience=10, gamma=0.5, batch_size=4):
+def run(UNet, lr= 1e-3, num_epochs= 60, dataset_filter='cleaned', patience=10, gamma=0.5, batch_size=4):
     
-    data_files = [f for f in os.listdir(input_dir + '/data')]
-
+    data_files = filterDataset(dataset_filter)
+    
     mean, std = getMeanAndStd(data_files)
 
     transform = transforms.Compose([transforms.Normalize(mean, std)])
@@ -348,9 +352,9 @@ def run(UNet, lr= 1e-3, num_epochs= 60, input_dir='inputs/cleaned', patience=10,
 
     print(f"Train: {len(train_files)} | Val: {len(val_files)} | Test: {len(test_files)}")
 
-    train_dataloader = get_data_loader(train_files, trans=transform, input_dir=input_dir, batch_size=batch_size)
-    val_dataloader = get_data_loader(val_files, trans=transform, input_dir=input_dir, batch_size=batch_size)
-    test_dataloader = get_data_loader(test_files, trans=transform, input_dir=input_dir, batch_size=batch_size)
+    train_dataloader = get_data_loader(train_files, trans=transform, batch_size=batch_size)
+    val_dataloader = get_data_loader(val_files, trans=transform, batch_size=batch_size)
+    test_dataloader = get_data_loader(test_files, trans=transform, batch_size=batch_size)
 
     dataloaders = {
         "train": train_dataloader,
@@ -364,7 +368,7 @@ def run(UNet, lr= 1e-3, num_epochs= 60, input_dir='inputs/cleaned', patience=10,
       
     validate_one_epoch(model, test_dataloader, device, thresholds=[best_threshold])
     
-def predict_one(model, image_path, mask_path, threshold=0.5, visualize=False, input_dir='dataset'):
+def predict_one(model, image_path, mask_path, threshold=0.5, visualize=False, dataset_filter='dataset'):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -380,7 +384,7 @@ def predict_one(model, image_path, mask_path, threshold=0.5, visualize=False, in
     mask = mask.astype(np.uint8)
     mask[0][0] = 0 # for plotting
 
-    data_files = [f for f in os.listdir(input_dir + '/data')]
+    data_files = filterDataset(dataset_filter)
 
     mean, std = getMeanAndStd(data_files)
     transform = transforms.Compose([
@@ -436,24 +440,27 @@ def predict_one(model, image_path, mask_path, threshold=0.5, visualize=False, in
 
     return percentage_match, pred
 
-def predict_and_clean(model, input_dir='dataset', best_threshold=0.5, confidence=90, replace=False, visualize=False):
+def predict_and_clean(model, dataset_filter='dataset', best_threshold=0.5, confidence=90, replace=False, visualize=False):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model = model.to(device)
     model.eval()
 
-    data_files = sorted([f for f in os.listdir(input_dir + '/data')])
+    data_files = filterDataset(dataset_filter)
 
     total_samples = 0
     total_percentage = 0
 
+    noise = []
+    cleaned = []
+
     for file_name in tqdm(data_files, desc="Predicting"):
 
-        image_path = input_dir + '/data/' + file_name
-        mask_path = input_dir + '/masks/' + file_name
+        image_path = 'dataset' + '/data/' + file_name
+        mask_path = 'dataset' + '/masks/' + file_name
 
-        percentage_match, pred = predict_one(model, image_path, mask_path, threshold=best_threshold, visualize=visualize, input_dir=input_dir)
+        percentage_match, pred = predict_one(model, image_path, mask_path, threshold=best_threshold, visualize=visualize, dataset_filter=dataset_filter)
         
         total_percentage += percentage_match
         total_samples += 1
@@ -462,18 +469,17 @@ def predict_and_clean(model, input_dir='dataset', best_threshold=0.5, confidence
 
         if percentage_match < confidence:
             if replace:
-                shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('inputs/processed/data', file_name))
+                shutil.copy(os.path.join('dataset' + '/data', file_name), os.path.join('inputs/processed/data', file_name))
                 save_predicted_mask(pred_mask=pred, 
                                     reference_tif_path='dataset/masks/100096.tif', save_folder='inputs/processed/masks', save_name=file_name)
             else:
-                shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('noise/data', file_name))
-                shutil.copy(os.path.join(input_dir + '/masks', file_name), os.path.join('noise/masks', file_name))
+                noise.append(file_name)
         else:
-            shutil.copy(os.path.join(input_dir + '/data', file_name), os.path.join('inputs/cleaned/data', file_name))
-            shutil.copy(os.path.join(input_dir + '/masks', file_name), os.path.join('inputs/cleaned/masks', file_name))
+            cleaned.append(file_name)
 
     avg_percentage_match = total_percentage / total_samples
     print(f"Average Percentage Match on Test Set: {avg_percentage_match:.2f}%")
+    return cleaned, noise
 
 def save_predicted_mask(pred_mask: np.ndarray, reference_tif_path: str, save_folder: str, save_name: str):
     
