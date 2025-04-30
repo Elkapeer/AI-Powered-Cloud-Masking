@@ -4,16 +4,21 @@ This helps in solving the cloud obstruction issue in optical satellite imagery, 
 
 ## Requirements
 
-Firstly, you need to install required packages and libraries, it can be found in `requirements.txt`. You can install them using 
+Firstly, clone the repo using
+```bash
+git clone https://github.com/Elkapeer/AI-Powered-Cloud-Masking.git
+cd AI-Powered-Cloud-Masking
+```
+Then, install required packages and libraries, it can be found in `requirements.txt`. You can install them using 
 ```bash
 pip install -r requirements.txt
 ```
 
-Secondly, install dataset from this [Google Drive Link](https://drive.google.com/file/d/1-cU2qx7XY_lwCC7PKOnnNRkeyRto80gC/view), and rename folder to `dataset`.
+Also, install dataset from this [Google Drive Link](https://drive.google.com/file/d/1-cU2qx7XY_lwCC7PKOnnNRkeyRto80gC/view), and rename folder to `dataset`.
+
+For GPU acceleration, ensure that CUDA-compatible [PyTorch CUDA 12.8](https://pytorch.org/get-started/locally/) is installed.
 
 Make sure to have python 3.10+ installed.
-
-For GPU acceleration, ensure that CUDA-compatible PyTorch is installed.
 
 ## Project Structure
 ```
@@ -38,9 +43,13 @@ PROJECT/
 ├── utilities.py                  # Helper functions
 ```
 
+## Project Pipeline
+
+![Project Pipeline](project_pipeline.png)
+
 ## Running The Project
 
-### Test Model
+### Testing Model
 
 ```bash
 python3 run_inference.py <test_folder_path> <model_path>
@@ -50,3 +59,16 @@ Example
 python3 .\run_inference.py test/test/data .\models\instance_norm_e3.pkl
 ```
 
+### Profiling
+
+```bash
+python profiler.py <model_path> <input_tensor_shape>
+```
+Example
+```bash
+python3 .\profiler.py \models\instance_norm_e3.pkl 1 4 512 512
+```
+
+## Report
+
+You can find the final report [here](Team_6.pdf)
