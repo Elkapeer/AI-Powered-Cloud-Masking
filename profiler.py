@@ -34,6 +34,20 @@ def count_bn2d(m, x, y):
 
     m.total_ops += torch.Tensor([int(total_ops)])
 
+def count_instancenorm2d(m, x, y):
+    x = x[0]
+    nelements = x.numel()
+
+    # Subtract mean and divide by std: 2 ops per element
+    total_ops = 2 * nelements
+
+    # If affine=True, apply scale and shift: +2 ops per element
+    if m.affine:
+        total_ops += 2 * nelements
+
+    m.total_ops += torch.Tensor([int(total_ops)])
+
+
 def count_relu(m, x, y):
     x = x[0]
 
@@ -95,6 +109,8 @@ def profile(model, input_size, custom_ops = {}):
             m.register_forward_hook(count_conv2d)
         elif isinstance(m, nn.BatchNorm2d):
             m.register_forward_hook(count_bn2d)
+        elif isinstance(m, nn.InstanceNorm2d):
+            m.register_forward_hook(count_instancenorm2d)
         elif isinstance(m, nn.ReLU):
             m.register_forward_hook(count_relu)
         elif isinstance(m, (nn.MaxPool1d, nn.MaxPool2d, nn.MaxPool3d)):

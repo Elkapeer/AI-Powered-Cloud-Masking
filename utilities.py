@@ -14,6 +14,7 @@ import pandas as pd
 import os
 import shutil
 import torch
+from skimage.transform import resize
 
 def filterDataset(filename):
     with open('dataset_filter/' + filename + '.txt', 'r') as f:
@@ -92,10 +93,9 @@ def reverse_transform(inp, mean, std):
     return inp
 
 class LazyDataset(Dataset):
-    def __init__(self, image_files, input_dir='dataset', transform=None):
+    def __init__(self, image_files, input_dir='dataset'):
         self.image_files = image_files
         self.input_dir = input_dir
-        self.transform = transform
 
     def __len__(self):
         return len(self.image_files)
@@ -110,11 +110,8 @@ class LazyDataset(Dataset):
             image = torch.from_numpy(image)
 
         with rasterio.open(mask_path) as src:
-            mask = src.read(1).astype(np.float32)  # (H, W)
+            mask = src.read(1).astype(np.float32)
             mask = torch.from_numpy(mask).unsqueeze(0)
-
-        if self.transform:
-            image = self.transform(image)
 
         return image, mask
     
@@ -161,9 +158,9 @@ def split_dataset(file_list, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
 
     return train_files, val_files, test_files
 
-def get_data_loader(data_files, trans, input_dir='dataset', batch_size=25, shuffle=True):
+def get_data_loader(data_files, input_dir='dataset', batch_size=25, shuffle=True):
 
-    data_set = LazyDataset(data_files, input_dir=input_dir, transform=trans)
+    data_set = LazyDataset(data_files, input_dir=input_dir)
     
     dataloader = DataLoader(data_set, batch_size=batch_size, shuffle=shuffle, num_workers=0)
         
@@ -338,8 +335,6 @@ def run(UNet, lr= 1e-3, num_epochs= 60, dataset_filter='cleaned', patience=10, g
     
     mean, std = getMeanAndStd(data_files)
 
-    transform = transforms.Compose([transforms.Normalize(mean, std)])
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model = UNet.to(device)
@@ -352,9 +347,9 @@ def run(UNet, lr= 1e-3, num_epochs= 60, dataset_filter='cleaned', patience=10, g
 
     print(f"Train: {len(train_files)} | Val: {len(val_files)} | Test: {len(test_files)}")
 
-    train_dataloader = get_data_loader(train_files, trans=transform, batch_size=batch_size)
-    val_dataloader = get_data_loader(val_files, trans=transform, batch_size=batch_size)
-    test_dataloader = get_data_loader(test_files, trans=transform, batch_size=batch_size)
+    train_dataloader = get_data_loader(train_files, batch_size=batch_size)
+    val_dataloader = get_data_loader(val_files, batch_size=batch_size)
+    test_dataloader = get_data_loader(test_files, batch_size=batch_size)
 
     dataloaders = {
         "train": train_dataloader,
@@ -503,7 +498,7 @@ def save_predicted_mask(pred_mask: np.ndarray, reference_tif_path: str, save_fol
 
     # print(f"Saved predicted mask to: {save_path}")
 
-def inference(model, image_path, threshold, transform):
+def inference(model, image_path, threshold):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model.eval()
@@ -512,10 +507,12 @@ def inference(model, image_path, threshold, transform):
     with rasterio.open(image_path) as src:
         image = src.read()  # shape: (C, H, W)
     image = image.astype(np.float32)
+    
+    image = resize(image.transpose(1, 2, 0), (512, 512), order=1, preserve_range=True)
+    image = image.transpose(2, 0, 1)
 
     image_tensor = torch.from_numpy(image)
-    image_tensor = transform(image_tensor)
-    image_tensor = image_tensor.unsqueeze(0) # Add batch dimension  # shape: (1, C, H, W)
+    image_tensor = image_tensor.unsqueeze(0)  # shape: (1, C, H, W)
     image_tensor = image_tensor.to(device)
 
     with torch.no_grad():
@@ -525,4 +522,3 @@ def inference(model, image_path, threshold, transform):
 
     pred_mask = pred.squeeze().cpu().numpy().astype(np.uint8)
     return pred_mask
-
